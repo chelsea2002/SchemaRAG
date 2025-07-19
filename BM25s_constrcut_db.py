@@ -3,8 +3,8 @@ import os
 from function import get_schema_dict, extract_db_samples_enriched_bm25
 from tqdm import tqdm
 
-DATA = "./train.json"
-OUTPUT_FILE = './train_quic.json'
+DATA = "./data.json"
+OUTPUT_FILE = './data_with_sample.json'
 CHECKPOINT_DIR = './checkpoints'
 CHECKPOINT_INTERVAL = 100
 
@@ -120,7 +120,7 @@ for index, dt in enumerate(tqdm(datasets[start_idx:], desc="Processing", initial
     evidence = dt['evidence']
     database = dt['database']
     db_id = dt['db_id']
-    db_path = rf"C:\Users\Administrator\Desktop\Codes\Auto-prompt-model\data\bird_train\databases\{db_id}\{db_id}.sqlite"
+    db_path = "/path/to/data/database/{db_id}/{db_id}.sqlite"
 
     schema_dict = get_schema_dict(db_path)
     sample = extract_db_samples_enriched_bm25(question, db_path, schema_dict,evidence, 2)# 
