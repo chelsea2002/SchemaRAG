@@ -84,7 +84,7 @@ def main():
     # Local model and dataset paths
     local_model_path = "/path/to/your/model"  # Local model folder path
     local_dataset_path_train = "/path/to/your/data/train_data.json"  # Local training data JSON file path
-    output_dir = "./qwen_local_finetune_CoT"
+    output_dir = "./qwen_finetune_CoT"
     local_dataset_path_val = "/path/to/your/data/val_data.json"  # Local validation data JSON file path
 
     
