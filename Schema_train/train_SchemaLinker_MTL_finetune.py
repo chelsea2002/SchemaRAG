@@ -200,10 +200,10 @@ class CustomTrainer(Trainer):
 
 def main():
     # Local model and dataset paths
-    local_model_path = "/path/to/your/model"
+    local_model_path = "/path/to/your/qwen_finetune_CoT"
     local_dataset_path_train = "/path/to/your/data/train.json"
     local_dataset_path_val = "/path/to/your/data/val.json"
-    output_dir = "./model_full_finetune_results_multitask"
+    output_dir = "./qwen_finetune_mtl"
     
     # Device configuration and memory optimization
     torch.cuda.empty_cache()
