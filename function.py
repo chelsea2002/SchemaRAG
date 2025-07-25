@@ -91,10 +91,10 @@ def validate_sql_statement(sql_query: str,db_id,data):
         cursor = conn.cursor()
         cursor.execute(sql_query)
         conn.close()
-        return True
+        return 1.0
 
     except:
-        return False
+        return 0.0
     finally:
         # Ensure connection is closed
         if conn:
