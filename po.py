@@ -7,7 +7,10 @@ from typing import List, Dict, Tuple, Set, Any, Optional
 import numpy as np
 from dataclasses import dataclass
 import re
+from function import validate_sql_statement
+from arg import main_args
 
+args = main_args()
 
 @dataclass
 class SQLCandidate:
@@ -235,14 +238,14 @@ class ASTProcessor:
 class ParetoOptimal:
     """Pareto Optimal SQL Generator"""
     
-    def __init__(self, database_path: str = None):
+    def __init__(self, db_id: str = None):
         """
         Initialize po
         
         Args:
-            database_path: SQLite database path for executability checking
+            db_id: SQLite database name for executability checking
         """
-        self.database_path = database_path
+        self.db_id = db_id
         self.ast_processor = ASTProcessor()
         
         # Extended SQL keywords list
@@ -269,7 +272,7 @@ class ParetoOptimal:
         Returns:
             Executability score (1.0 for executable, 0.0 for non-executable)
         """
-        if not self.database_path:
+        if not self.db_id:
             # If no database, perform simple syntax check
             try:
                 parsed = sqlparse.parse(sql)
@@ -278,19 +281,7 @@ class ParetoOptimal:
                 return 0.0
         
         try:
-            conn = sqlite3.connect(self.database_path)
-            cursor = conn.cursor()
-            
-            # Try to execute SQL (use LIMIT 1 to avoid large result sets)
-            limited_sql = self._add_limit_to_sql(sql, 1)
-            cursor.execute(limited_sql)
-            cursor.fetchall()
-            conn.close()
-            return 1.0
-        except Exception as e:
-            if conn:
-                conn.close()
-            return 0.0
+            return is_val = validate_sql_statement(sql, db_id, args.dataset) 
     
     def _add_limit_to_sql(self, sql: str, limit: int) -> str:
         """Add LIMIT clause to SQL"""
