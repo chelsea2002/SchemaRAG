@@ -16,8 +16,7 @@ def result_callback(result):
 
 def execute_sql(predicted_sql,ground_truth, db_path):
     """
-    执行SQL并比较效果
-    return 1表示结果集相同，0表示结果集不同
+    Execute SQL and compare the results return 1 means the result sets are the same, 0 means the result sets are different
     """
     conn = sqlite3.connect(db_path)
     # Connect to the database
@@ -34,15 +33,15 @@ def execute_sql(predicted_sql,ground_truth, db_path):
 
 def save_error_queries(exec_results, output_path):
     """
-    保存错误的SQL查询到文件
+    Save incorrect SQL queries to a file
     Args:
-        exec_results: 执行结果列表
-        output_path: 输出文件路径
+        exec_results
+        output_path
     """
     error_queries = [result for result in exec_results if result['res'] == 0]
     total_errors = len(error_queries)
 
-    # 获取与predicted_sql_path相同的目录
+    # Get the same directory as predicted_sql_path
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -181,7 +180,7 @@ if __name__ == '__main__':
     run_sqls_parallel(query_pairs, db_places=db_paths, num_cpus=args.num_cpus, meta_time_out=args.meta_time_out)
     exec_result = sort_results(exec_result)
 
-    # 设置错误输出文件路径
+    # Set the error output file path
     if not args.error_output_path:
         error_output_path = os.path.join(
             os.path.dirname(args.predicted_sql_path),
@@ -190,7 +189,7 @@ if __name__ == '__main__':
     else:
         error_output_path = args.error_output_path
 
-    # 保存错误查询
+    # Save Error Queries
     total_errors = save_error_queries(exec_result, error_output_path)
     print(f"\nError queries saved to: {error_output_path}")
     print(f"Total number of errors: {total_errors}")
