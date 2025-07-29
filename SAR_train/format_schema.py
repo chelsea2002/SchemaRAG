@@ -17,26 +17,42 @@ def parse_database_schema(database_text: str) -> Dict[str, Any]:
         "columns": {}
     }
     
-    # Use regex to find all table definitions
-    table_pattern = r'# Table: (\w+)\s*\[(.*?)\]'
-    tables = re.findall(table_pattern, database_text, re.DOTALL)
+    # 先找到所有表的开始位置
+    table_start_pattern = r'# Table: (\w+)\s*\['
+    table_starts = []
     
-    for table_name, table_content in tables:
-        schema["tables"].append(table_name)
+    for match in re.finditer(table_start_pattern, database_text):
+        table_starts.append({
+            'name': match.group(1),
+            'start': match.start(),
+            'bracket_start': match.end() - 1  # '[' 的位置
+        })
+    
+    # 为每个表找到对应的结束位置
+    for i, current_table in enumerate(table_starts):
+        # 确定搜索范围
+        search_start = current_table['bracket_start'] + 1
+        if i + 1 < len(table_starts):
+            search_end = table_starts[i + 1]['start']
+        else:
+            search_end = len(database_text)
         
-        # Extract column names
-        columns = []
-        # Match format like: (cdscode:TEXT, Primary Key, Examples: [01100170109835, 01100170112607])
-        column_pattern = r'\(([^:]+):'
-        column_matches = re.findall(column_pattern, table_content)
+        search_text = database_text[search_start:search_end]
         
-        for column_name in column_matches:
-            # Clean column name, remove possible spaces and special characters
-            clean_column = column_name.strip()
-            if clean_column:
-                columns.append(clean_column)
+        # 找到匹配的 ]，这个 ] 应该在行首（或者前面只有空白字符）
+        end_bracket_pattern = r'^\s*\]'
+        end_match = re.search(end_bracket_pattern, search_text, re.MULTILINE)
         
-        schema["columns"][table_name] = columns
+        if end_match:
+            table_content_end = search_start + end_match.start()
+            table_content = database_text[current_table['bracket_start'] + 1:table_content_end]
+            
+            # 提取列名
+            column_pattern = r'\((\w+):'
+            column_matches = re.findall(column_pattern, table_content)
+            
+            schema["tables"].append(current_table['name'])
+            schema["columns"][current_table['name']] = column_matches
     
     return schema
 
@@ -75,7 +91,13 @@ def process_json_file(input_file: str, output_file: str = None):
                 # Add schema key
                 item["schema"] = schema
                 
-                print(f"Successfully processed dictionary {i+1}, found {len(schema['tables'])} tables")
+                # 打印更详细的信息
+                total_columns = sum(len(cols) for cols in schema['columns'].values())
+                print(f"Successfully processed dictionary {i+1}, found {len(schema['tables'])} tables, {total_columns} columns total")
+                
+                # 打印每个表的列数
+                for table_name, columns in schema['columns'].items():
+                    print(f"  - {table_name}: {len(columns)} columns")
                 
             except Exception as e:
                 print(f"Error processing dictionary {i+1}: {e}")
@@ -95,6 +117,8 @@ def process_json_file(input_file: str, output_file: str = None):
     except Exception as e:
         print(f"Error occurred while processing file: {e}")
 
+
 if __name__ == "__main__":
-    # Usage example: specify file paths directly
-    # process_json_file('train_input.json', 'train_output.json')
+    
+    # 然后处理实际文件
+    process_json_file('train_input.json', 'train_output.json')
