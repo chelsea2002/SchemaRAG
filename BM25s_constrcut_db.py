@@ -117,10 +117,10 @@ for index, dt in enumerate(tqdm(datasets[start_idx:], desc="Processing", initial
     actual_idx = index + start_idx
     
     question = dt['question']
-    evidence = dt['evidence']
+    evidence = dt['evidence']          # or evidence =""
     database = dt['database']
     db_id = dt['db_id']
-    db_path = "/path/to/data/database/{db_id}/{db_id}.sqlite"
+    db_path = f"/path/to/data/database/{db_id}/{db_id}.sqlite"
 
     schema_dict = get_schema_dict(db_path)
     sample = extract_db_samples_enriched_bm25(question, db_path, schema_dict,evidence, 2)# 
