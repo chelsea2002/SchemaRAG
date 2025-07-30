@@ -11,6 +11,8 @@ from typing import List, Dict, Tuple, Optional
 import math
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings('ignore')
 
 class SchemaAwareModel(nn.Module):
     """Schema-Aware Representation Learning Model"""
@@ -47,6 +49,20 @@ class SchemaAwareModel(nn.Module):
         self.question_proj = nn.Linear(embed_dim, embed_dim)
         self.output_proj = nn.Linear(embed_dim, embed_dim)
         
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize model parameters"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                # Xavier initialization
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.LayerNorm):
+                nn.init.constant_(module.bias, 0)
+                nn.init.constant_(module.weight, 1.0)
+    
     def forward(self, 
                 question_embed: torch.Tensor,
                 table_embeds: torch.Tensor,
@@ -74,16 +90,35 @@ class SchemaAwareModel(nn.Module):
             columns_i = column_embeds[:, i, :, :]
             col_mask_i = column_masks[:, i, :]
             
+            # Check if there are valid tables and columns
+            table_is_valid = table_masks[:, i].any()
+            has_valid_columns = col_mask_i.sum() > 0
+            
+            if not table_is_valid or not has_valid_columns:
+                column_aware_table_embeds.append(table_i)
+                continue
+            
             table_i_proj = self.table_proj(table_i)
             columns_i_proj = self.column_proj(columns_i)
+            
+            # L2 normalization
+            table_i_proj = F.normalize(table_i_proj, p=2, dim=-1) * math.sqrt(self.embed_dim)
+            columns_i_proj = F.normalize(columns_i_proj, p=2, dim=-1) * math.sqrt(self.embed_dim)
+            
+            valid_col_indices = col_mask_i.bool()
+            if not valid_col_indices.any():
+                column_aware_table_embeds.append(table_i)
+                continue
             
             attn_output, _ = self.table_column_attention(
                 query=table_i_proj,
                 key=columns_i_proj,
                 value=columns_i_proj,
-                key_padding_mask=~col_mask_i.bool()
+                key_padding_mask=~valid_col_indices,
+                need_weights=False
             )
             
+            # Residual connection and layer normalization
             column_aware_table_i = self.layer_norm1(table_i + attn_output)
             column_aware_table_embeds.append(column_aware_table_i)
         
@@ -92,14 +127,20 @@ class SchemaAwareModel(nn.Module):
         # Generate schema-aware embedding
         question_proj = self.question_proj(question_embed.unsqueeze(1))
         
-        schema_aware_output, attention_weights = self.question_table_attention(
-            query=question_proj,
-            key=column_aware_tables,
-            value=column_aware_tables,
-            key_padding_mask=~table_masks.bool()
+        # L2 normalization
+        question_norm = F.normalize(question_proj, p=2, dim=-1) * math.sqrt(self.embed_dim)
+        tables_norm = F.normalize(column_aware_tables, p=2, dim=-1) * math.sqrt(self.embed_dim)
+        
+        attn_output, attention_weights = self.question_table_attention(
+            query=question_norm,
+            key=tables_norm,
+            value=tables_norm,
+            key_padding_mask=~table_masks.bool(),
+            need_weights=True
         )
         
-        schema_aware_embed = self.layer_norm2(question_proj + schema_aware_output)
+        # Residual connection and layer normalization
+        schema_aware_embed = self.layer_norm2(question_proj + attn_output)
         schema_aware_embed = self.output_proj(schema_aware_embed.squeeze(1))
         
         return schema_aware_embed, attention_weights
@@ -122,6 +163,7 @@ class SchemaAwareDataset(Dataset):
             self.table_masks = embeddings['table_masks']
             self.column_masks = embeddings['column_masks']
             self.sqls = embeddings['sqls']
+            
         elif data_file and flag_model:
             self.flag_model = flag_model
             self._process_data(data_file)
@@ -144,56 +186,61 @@ class SchemaAwareDataset(Dataset):
         
         print("Processing schema-aware dataset...")
         for item in tqdm(data, desc="Encoding questions, schemas and SQLs"):
-            question = item['question']
-            sql = item['query']
-            
-            if 'schema' in item:
-                tables = item['schema']['tables']
-                table_columns = item['schema']['columns']
-            else:
-                raise ValueError("Schema information missing from data")
-            
-            question_embed = torch.tensor(self.flag_model.encode(question), dtype=torch.float32)
-            sql_embed = torch.tensor(self.flag_model.encode(sql), dtype=torch.float32)
-            
-            table_embed_list = []
-            column_embed_list = []
-            table_mask = torch.zeros(self.max_tables, dtype=torch.bool)
-            column_mask = torch.zeros(self.max_tables, self.max_columns, dtype=torch.bool)
-            
-            for i, table in enumerate(tables[:self.max_tables]):
-                table_embed = torch.tensor(self.flag_model.encode(f"Table: {table}"), dtype=torch.float32)
-                table_embed_list.append(table_embed)
-                table_mask[i] = True
+            try:
+                question = item['question']
+                sql = item['query']
                 
-                columns = table_columns.get(table, [])
-                table_column_embeds = []
+                if 'schema' in item:
+                    tables = item['schema']['tables']
+                    table_columns = item['schema']['columns']
+                else:
+                    raise ValueError("Schema information missing from data")
                 
-                for j, column in enumerate(columns[:self.max_columns]):
-                    column_embed = torch.tensor(
-                        self.flag_model.encode(f"Column: {column} in {table}"), 
-                        dtype=torch.float32
-                    )
-                    table_column_embeds.append(column_embed)
-                    column_mask[i, j] = True
+                question_embed = torch.tensor(self.flag_model.encode(question), dtype=torch.float32)
+                sql_embed = torch.tensor(self.flag_model.encode(sql), dtype=torch.float32)
                 
-                while len(table_column_embeds) < self.max_columns:
-                    table_column_embeds.append(torch.zeros_like(question_embed))
+                table_embed_list = []
+                column_embed_list = []
+                table_mask = torch.zeros(self.max_tables, dtype=torch.bool)
+                column_mask = torch.zeros(self.max_tables, self.max_columns, dtype=torch.bool)
                 
-                column_embed_list.append(torch.stack(table_column_embeds))
-            
-            while len(table_embed_list) < self.max_tables:
-                table_embed_list.append(torch.zeros_like(question_embed))
-                column_embed_list.append(torch.zeros(self.max_columns, question_embed.shape[0]))
-            
-            self.questions.append(question)
-            self.sqls.append(sql)
-            self.question_embeds.append(question_embed)
-            self.sql_embeds.append(sql_embed)
-            self.table_embeds.append(torch.stack(table_embed_list))
-            self.column_embeds.append(torch.stack(column_embed_list))
-            self.table_masks.append(table_mask)
-            self.column_masks.append(column_mask)
+                for i, table in enumerate(tables[:self.max_tables]):
+                    table_embed = torch.tensor(self.flag_model.encode(f"Table: {table}"), dtype=torch.float32)
+                    table_embed_list.append(table_embed)
+                    table_mask[i] = True
+                    
+                    columns = table_columns.get(table, [])
+                    table_column_embeds = []
+                    
+                    for j, column in enumerate(columns[:self.max_columns]):
+                        column_embed = torch.tensor(
+                            self.flag_model.encode(f"Column: {column} in {table}"), 
+                            dtype=torch.float32
+                        )
+                        table_column_embeds.append(column_embed)
+                        column_mask[i, j] = True
+                    
+                    while len(table_column_embeds) < self.max_columns:
+                        table_column_embeds.append(torch.zeros_like(question_embed))
+                    
+                    column_embed_list.append(torch.stack(table_column_embeds))
+                
+                while len(table_embed_list) < self.max_tables:
+                    table_embed_list.append(torch.zeros_like(question_embed))
+                    column_embed_list.append(torch.zeros(self.max_columns, question_embed.shape[0]))
+                
+                self.questions.append(question)
+                self.sqls.append(sql)
+                self.question_embeds.append(question_embed)
+                self.sql_embeds.append(sql_embed)
+                self.table_embeds.append(torch.stack(table_embed_list))
+                self.column_embeds.append(torch.stack(column_embed_list))
+                self.table_masks.append(table_mask)
+                self.column_masks.append(column_mask)
+                
+            except Exception as e:
+                print(f"Error processing item: {e}")
+                continue
     
     def save_embeddings(self, save_path):
         """Save precomputed embeddings"""
@@ -236,9 +283,12 @@ class SchemaAwareTrainer:
         self.model = model.to(device)
         self.device = device
         
-        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=10, gamma=0.1)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-5)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=10, gamma=0.5)
         self.criterion = nn.MSELoss()
+        
+        # Gradient clipping
+        self.max_grad_norm = 1.0
         
     def train_epoch(self, dataloader: DataLoader) -> Tuple[float, float]:
         """Train for one epoch"""
@@ -265,6 +315,10 @@ class SchemaAwareTrainer:
             similarity = F.cosine_similarity(schema_aware_embeds, sql_embeds, dim=-1).mean()
             
             loss.backward()
+            
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+            
             self.optimizer.step()
             
             total_loss += loss.item()
@@ -319,6 +373,8 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
     val_similarities = []
     
     best_val_loss = float('inf')
+    patience = 5
+    patience_counter = 0
     
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch + 1}/{num_epochs}")
@@ -337,6 +393,7 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
         
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            patience_counter = 0
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': trainer.optimizer.state_dict(),
@@ -345,7 +402,14 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
                 'similarity': val_sim
             }, save_path)
             print(f"Saved best model with val loss: {val_loss:.4f}")
-        
+        else:
+            patience_counter += 1
+            
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"Early stopping at epoch {epoch + 1}")
+            break
+            
         trainer.scheduler.step()
     
     # Save final model
@@ -353,7 +417,7 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': trainer.optimizer.state_dict(),
-        'epoch': num_epochs - 1,
+        'epoch': epoch,
         'loss': val_losses[-1],
         'similarity': val_similarities[-1]
     }, final_save_path)
@@ -362,8 +426,8 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
     os.makedirs(output_dir, exist_ok=True)
     
     plt.figure(figsize=(10, 6))
-    plt.plot(range(1, num_epochs + 1), train_similarities, label='Train Similarity')
-    plt.plot(range(1, num_epochs + 1), val_similarities, label='Val Similarity')
+    plt.plot(range(1, len(train_similarities) + 1), train_similarities, label='Train Similarity')
+    plt.plot(range(1, len(val_similarities) + 1), val_similarities, label='Val Similarity')
     plt.xlabel('Epoch')
     plt.ylabel('Cosine Similarity')
     plt.title('Schema-Aware Embedding Similarity')
@@ -373,8 +437,8 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
     plt.close()
     
     plt.figure(figsize=(10, 6))
-    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
-    plt.plot(range(1, num_epochs + 1), val_losses, label='Val Loss')
+    plt.plot(range(1, len(train_losses) + 1), train_losses, label='Train Loss')
+    plt.plot(range(1, len(val_losses) + 1), val_losses, label='Val Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Schema-Aware Model Loss')
@@ -384,14 +448,74 @@ def train_schema_aware_model(model, train_loader, val_loader, num_epochs=20, lr=
     plt.close()
 
 
+def diagnose_data(dataset):
+    """Diagnose potential issues in the dataset"""
+    print("=== Data Diagnosis ===")
+    
+    # Check dataset size
+    print(f"Dataset size: {len(dataset)}")
+    
+    # Statistics on valid tables and columns distribution
+    valid_tables_count = []
+    valid_columns_count = []
+    
+    for i in range(len(dataset)):
+        item = dataset[i]
+        valid_tables = item['table_masks'].sum().item()
+        valid_columns = item['column_masks'].sum().item()
+        valid_tables_count.append(valid_tables)
+        valid_columns_count.append(valid_columns)
+    
+    print(f"Valid tables per sample - Mean: {np.mean(valid_tables_count):.2f}, "
+          f"Max: {max(valid_tables_count)}, Min: {min(valid_tables_count)}")
+    print(f"Valid columns per sample - Mean: {np.mean(valid_columns_count):.2f}, "
+          f"Max: {max(valid_columns_count)}, Min: {min(valid_columns_count)}")
+    
+    # Check how many samples have no valid tables or columns
+    no_tables = sum(1 for x in valid_tables_count if x == 0)
+    no_columns = sum(1 for x in valid_columns_count if x == 0)
+    print(f"Samples with no valid tables: {no_tables}")
+    print(f"Samples with no valid columns: {no_columns}")
+    
+    # Randomly sample a few data points for inspection
+    for i in range(min(3, len(dataset))):
+        item = dataset[i]
+        print(f"\nSample {i}:")
+        print(f"Question: {item['question'][:50]}...")
+        print(f"SQL: {item['sql'][:50]}...")
+        
+        # Check embedding statistics
+        q_embed = item['question_embed']
+        s_embed = item['sql_embed']
+        t_embed = item['table_embeds']
+        c_embed = item['column_embeds']
+        
+        print(f"Question embed - Mean: {q_embed.mean():.4f}, Std: {q_embed.std():.4f}, "
+              f"Norm: {torch.norm(q_embed).item():.4f}")
+        print(f"SQL embed - Mean: {s_embed.mean():.4f}, Std: {s_embed.std():.4f}, "
+              f"Norm: {torch.norm(s_embed).item():.4f}")
+        
+        # Check table embeddings
+        t_norms = torch.norm(t_embed, dim=-1)
+        print(f"Table embeds norm - Mean: {t_norms.mean():.4f}, Max: {t_norms.max():.4f}")
+        
+        # Check column embeddings
+        c_norms = torch.norm(c_embed, dim=-1)
+        print(f"Column embeds norm - Mean: {c_norms.mean():.4f}, Max: {c_norms.max():.4f}")
+        
+        # Check masks
+        print(f"Valid tables: {item['table_masks'].sum()}")
+        print(f"Valid columns: {item['column_masks'].sum()}")
+
+
 def main():
     """Main training function"""
     # Configuration - use relative paths
     embeddings_file = './embeddings/schema_aware_embeddings.pt'
-    data_file = './datasets/train.json'
-    model_save_path = './SAR/models/best_schema_aware_model.pth'
-    output_dir = './training_plots/schema_aware'
-    flag_model_path = './plm/bge-large-en-v1.5'
+    data_file = './data/train.json'
+    model_save_path = './models/best_schema_aware_model.pth'
+    output_dir = './outputs/training_plots'
+    flag_model_path = './models/embeddings/bge-large-en-v1.5'
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -406,16 +530,22 @@ def main():
         print("Loading existing embeddings...")
         dataset = SchemaAwareDataset(embeddings_file=embeddings_file)
     
+    # Diagnose data
+    diagnose_data(dataset)
+    
     # Split dataset
     train_size = int(0.9 * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(
-        dataset, [train_size, val_size]
+        dataset, [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)
     )
     
+    print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+    
     # Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, num_workers=0)
     
     # Initialize model
     model = SchemaAwareModel(
@@ -429,7 +559,7 @@ def main():
     # Train model
     train_schema_aware_model(
         model=model,
-        train_loader=train_loader,
+        train_loader=train_loader,  
         val_loader=val_loader,
         num_epochs=20,
         lr=1e-4,
@@ -443,17 +573,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-# {
-#   "question": "What is the name of the singer?",
-#   "query": "SELECT name FROM singer",
-#   "schema": {
-#     "tables": ["singer", "album"],
-#     "columns": {
-#       "singer": ["id", "name", "age"],
-#       "album": ["id", "title", "singer_id"]
-#     }
-#   }
-# }
