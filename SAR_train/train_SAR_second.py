@@ -15,7 +15,7 @@ import random
 from collections import defaultdict
 
 
-
+# 从第一阶段导入相同的模型定义
 class SafeMultiheadAttention(nn.Module):
     """Safe version of MultiheadAttention that handles edge cases"""
     def __init__(self, embed_dim, num_heads, dropout=0.1):
@@ -117,6 +117,7 @@ class SchemaAwareModel(nn.Module):
         self._init_weights()
         
     def _init_weights(self):
+        """使用 Xavier 初始化防止梯度爆炸"""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight, gain=1.0)
@@ -1284,7 +1285,7 @@ def main_stage2():
     data_file = './train_SAR_CL.json'
     embeddings_file = 'embeddings/stage2_embeddings.pt'
     stage1_model_path = './SAR/models/best_schema_aware_model.pth'
-    flag_model_path = './plm/embeddingmodels'
+    flag_model_path = '../plm/embeddingmodel'
     stage2_model_save_path = './SAR/models/best_contrastive_model.pth'
     output_dir = './training_plots/stage2'
     

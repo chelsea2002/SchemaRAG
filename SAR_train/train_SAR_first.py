@@ -556,7 +556,7 @@ def main():
     embeddings_file = './embeddings/schema_aware_embeddings.pt'
     data_file = './train_SAR_SA.json'
     model_save_path = './SAR/models/best_schema_aware_model.pth'
-    flag_model_path = './plm/embedding_model'
+    flag_model_path = './plm/embeddingmodel'
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
