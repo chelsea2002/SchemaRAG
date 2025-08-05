@@ -18,7 +18,7 @@ Please read and understand the database schema carefully, and generate an execut
 args = main_args()
 DATASET = f"./data_with_sk.json"
 OUTPUT_FILE = "log/predicted.sql"
-SIMILAR_FILE = "top_k_similarities.json"
+SIMILAR_FILE = "retrieval_results.json"
 
 with open(SIMILAR_FILE, 'r', encoding='utf-8') as f:
     examples = json.load(f)
@@ -32,88 +32,6 @@ def prompt_maker(question, database, schema_links_pred):
     print(prompt)
     return prompt
 
-def extract_schema_links(json_dict, database_name, schema_links):
-    """
-    Extract key-value pairs from a parsed JSON dictionary for specified database and schema links
-    
-    Parameters:
-    json_dict (dict): Already parsed JSON dictionary
-    database_name (str): Database name
-    schema_links (list): List in table_name.column_name format
-    
-    Returns:
-    dict: Dictionary of matching key-value pairs
-    """
-    # Check input type
-    if isinstance(json_dict, str):
-        # If input is string, try to parse as dictionary (for backward compatibility)
-        try:
-            import json
-            import re
-            
-            # Since the provided content is not in standard JSON format, preprocessing is needed
-            content_lines = json_dict.strip().split('\n')
-            parsed_dict = {}
-            
-            current_key = None
-            current_value = ""
-            
-            for line in content_lines:
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # Check if it's the start of a new key-value pair
-                match = re.match(r'"([^"]+)": "(.*)', line)
-                if match:
-                    if current_key:  # Save the previous key-value pair
-                        parsed_dict[current_key] = current_value.strip()
-                        
-                    current_key = match.group(1)
-                    current_value = match.group(2)
-                    
-                    # If current line is a complete key-value pair
-                    if line.endswith('",'):
-                        current_value = current_value[:-1]  # Remove the trailing comma
-                        parsed_dict[current_key] = current_value
-                        current_key = None
-                        current_value = ""
-                else:
-                    # Continue the value of the previous key-value pair
-                    if current_key:
-                        current_value += " " + line
-                        if line.endswith('",'):
-                            current_value = current_value[:-1]  # Remove the trailing comma
-                            parsed_dict[current_key] = current_value
-                            current_key = None
-                            current_value = ""
-            
-            # Handle the last key-value pair
-            if current_key:
-                parsed_dict[current_key] = current_value
-                
-            # Assign the parsed dictionary to json_dict
-            json_dict = parsed_dict
-        except Exception as e:
-            print(f"String parsing failed: {e}")
-            return {}
-    
-    # Filter results based on schema_links
-    result = {}
-    for link in schema_links:
-        try:
-            table_name, column_name = link.split('.')
-            
-            # Find matching keys
-            for key, value in json_dict.items():
-                parts = key.split('|')
-                if len(parts) == 3 and parts[0] == database_name and parts[1] == table_name:
-                    result[key] = value
-        except Exception as e:
-            print(f"Processing link {link} failed: {e}")
-            continue
-    
-    return result
 
 def extract_sql_content(text):
     """
@@ -192,7 +110,7 @@ def extract_example_sqls(top_k_matches):
         for match in top_k_matches:
             if isinstance(match, dict):
                 # Try different possible key names
-                sql_keys = ['sql', 'query', 'SQL', 'Query']
+                sql_keys = ['rag_sql']
                 for key in sql_keys:
                     if key in match:
                         example_sqls.append(match[key])
