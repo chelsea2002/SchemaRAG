@@ -5,7 +5,7 @@ import json
 from tqdm import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-flag_model = FlagModel('/path/to/model/bge-large-en-v1.5', use_fp16=True)
+flag_model = FlagModel('/path/to/model/embeddingmodl', use_fp16=True)
 
 INPUT_SCHEMA = "data_pre.json"
 OUTPUT_SCHEMA = "data_pre_fix.json"
@@ -95,4 +95,5 @@ for i, schema in enumerate(tqdm(schemas, desc="Processing schemas")):
     schema['schema_pre_fixs'] = schema_fixs
 
 with open(OUTPUT_SCHEMA, "w", encoding="utf-8") as f:
+
     json.dump(schemas, f, ensure_ascii=False, indent=2)
