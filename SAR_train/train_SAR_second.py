@@ -15,7 +15,7 @@ import random
 from collections import defaultdict
 
 
-# 从第一阶段导入相同的模型定义
+
 class SafeMultiheadAttention(nn.Module):
     """Safe version of MultiheadAttention that handles edge cases"""
     def __init__(self, embed_dim, num_heads, dropout=0.1):
@@ -1310,4 +1310,5 @@ def main_stage2():
 
 
 if __name__ == "__main__":
+
     main_stage2()
