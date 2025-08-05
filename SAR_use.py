@@ -75,7 +75,6 @@ class SafeMultiheadAttention(nn.Module):
             # Fallback: return query as-is
             return query.clone(), None
 
-
 class SchemaAwareModel(nn.Module):
     """Schema-Aware Representation Learning Model with robust NaN handling"""
     def __init__(self, 
@@ -253,7 +252,6 @@ class SchemaAwareModel(nn.Module):
             schema_aware_embed = self.output_proj(question_embed)
         
         return schema_aware_embed, attention_weights
-
 
 class ContrastiveLearningModel(nn.Module):
     """Stage 2: Contrastive Learning Enhancement Model"""
@@ -796,8 +794,8 @@ def example_usage():
     # Configuration paths
     stage1_model_path = './SAR/models/best_schema_aware_model.pth'
     stage2_model_path = './SAR/models/best_contrastive_model.pth'
-    flag_model_path = './plm/embeddingmodels'
-    supervised_data_path = './RAG_Spider.json'
+    flag_model_path = './plm/embeddingmodel'
+    supervised_data_path = './RAG_Spider_formatdata.json'
     test_file_path = './dev_spider.json'
     output_file_path = './retrieval_results.json'
     cache_dir = './embedding_cache'
@@ -825,14 +823,9 @@ def example_usage():
     
     print(f"Processed {len(results)} test cases")
     
-    # Example: Clear cache for specific file
-    # sar_retrieval.clear_cache(supervised_data_path)
-    
-    # Example: Clear all cache
-    # sar_retrieval.clear_cache()
 
 
 if __name__ == "__main__":
     # Uncomment the line below to run the example instead of main
-    # example_usage()
+    example_usage()
     # main()
