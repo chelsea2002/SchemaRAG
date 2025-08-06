@@ -8,6 +8,11 @@ import time
 import logging
 import re
 from po import ParetoOptimal
+# Use local LLM
+# from llm_local import ModelInterface
+
+
+# qwen_model = ModelInterface()
 
 generation_prompt = '''
 You are an NL2SQL expert
@@ -152,7 +157,9 @@ def generate_and_validate_sql(
             logger.info(f"Attempt {attempt}: Generating SQL...")
             
             # Generate SQL candidates
-            responses = LLM_generation(generation_prompt, prompt)
+            # responses = qwen_model.LLM_generation(generation_prompt, prompt,args.n)
+            responses = LLM_generation(generation_prompt, prompt,args.n)
+
             candidate_sqls = []
             
             # Extract SQL from all responses
