@@ -185,7 +185,7 @@ Example format:
                      predicted_label: str, ground_truth_label: str, 
                      stats: Dict = None) -> bool:
         """
-        Validate CoT output according to paper's filtering criteria:
+        Validate CoT output:
         1. Final answer must match ground-truth label
         2. Extracted entities must be consistent with SQL query
         3. Output must follow the required format
@@ -339,4 +339,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
