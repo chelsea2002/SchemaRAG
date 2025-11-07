@@ -6,20 +6,25 @@ from sqlparse.sql import IdentifierList, Identifier, Where, Comparison
 from sqlparse.tokens import Keyword, DML
 from tqdm import tqdm
 from llm import LLM_generation
+from anthropic import Anthropic
 
 
 class RAGDataValidator:
     """
     RAG Data Generator and Validator Implementation
-    Modified to use LLM_generation for model calls
+    Uses LLM_generation for generation, Claude API for validation
     """
 
-    def __init__(self):
+    def __init__(self, api_key: str = None):
         """
-        Initialize the validator
-        Note: No longer needs API key as LLM_generation handles authentication
+        Initialize the validator with Claude API
+        
+        Args:
+            api_key: Anthropic API key for validation (if None, will try to read from environment)
         """
-        pass
+        # Claude API client for validation only
+        self.client = Anthropic(api_key=api_key)
+        self.model = "claude-sonnet-4-20250514"  # Claude 4 Sonnet for validation
 
     def generate_rag_triple(self, question: str, sql: str, schema: str, database_name: str) -> Dict:
         """
@@ -59,6 +64,7 @@ Respond in JSON format:
         instruct = "You are an expert in database query generation. Generate a new question-SQL pair following the specified requirements and output format."
         
         try:
+            # Use LLM_generation for generation task
             results = LLM_generation(instruct, prompt, n=1)
             response_text = results[0] if results else ""
             
@@ -129,7 +135,6 @@ Respond in JSON format:
         """
         Check SQL structural consistency
         
-        
         Args:
             original_sql: Original SQL
             generated_sql: Generated SQL
@@ -161,11 +166,9 @@ Respond in JSON format:
             print(f"Error checking structural consistency: {e}")
             return False
 
-    def check_semantic_matching(self, question: str, sql: str, schema: str) -> bool:
+    def check_semantic_matching(self, question: str, sql: str, schema: str) -> Tuple[bool, str]:
         """
-        Use LLM to check semantic matching
-       
-        accurately corresponds to its SQL query
+        Use Claude API to check semantic matching between question and SQL
         
         Args:
             question: Natural language question
@@ -173,7 +176,7 @@ Respond in JSON format:
             schema: Database schema
             
         Returns:
-            Whether semantically matched
+            (is_matched, explanation) Whether semantically matched and explanation
         """
         prompt = f"""Given the following database schema, question, and SQL query, determine if the SQL query correctly answers the question.
 
@@ -193,17 +196,29 @@ Does this SQL query correctly and completely answer the question? Consider:
 
 Respond with ONLY "YES" or "NO" followed by a brief explanation."""
 
-        instruct = "You are a database expert. Validate whether the SQL query correctly answers the given question."
-        
         try:
-            results = LLM_generation(instruct, prompt, n=1)
-            response = results[0].strip() if results else ""
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=500,
+                temperature=0,
+                system="You are a database expert. Validate whether the SQL query correctly answers the given question.",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            
+            response = message.content[0].text.strip()
             
             # Check if response starts with YES
-            return response.upper().startswith("YES")
+            is_matched = response.upper().startswith("YES")
+            return is_matched, response
+            
         except Exception as e:
             print(f"Error in semantic matching check: {e}")
-            return False
+            return False, f"Error: {str(e)}"
 
     def validate_rag_triple(self, triple: Dict, original_sql: str) -> Tuple[bool, Dict]:
         """
@@ -219,6 +234,7 @@ Respond with ONLY "YES" or "NO" followed by a brief explanation."""
         validation_details = {
             "structural_consistent": False,
             "semantic_matched": False,
+            "semantic_explanation": "",
             "valid": False
         }
 
@@ -236,20 +252,23 @@ Respond with ONLY "YES" or "NO" followed by a brief explanation."""
 
         print("  ✓ Structural consistency check passed")
 
-        # 2. Semantic matching check
-        print("Checking semantic matching...")
-        semantic_check = self.check_semantic_matching(
+        # 2. Semantic matching check using Claude API
+        print("Checking semantic matching with Claude API...")
+        semantic_check, explanation = self.check_semantic_matching(
             triple["question"],
             triple["sql"],
             triple["schema"]
         )
         validation_details["semantic_matched"] = semantic_check
+        validation_details["semantic_explanation"] = explanation
 
         if not semantic_check:
             print("  ✗ Semantic matching check failed")
+            print(f"  Explanation: {explanation}")
             return False, validation_details
 
         print("  ✓ Semantic matching check passed")
+        print(f"  Explanation: {explanation[:100]}...")
 
         # Both checks passed
         validation_details["valid"] = True
@@ -354,8 +373,10 @@ def main():
     """
     Main function: Demonstrate RAG data generation and validation workflow
     """
-    # Initialize validator (no API key needed with LLM_generation)
-    validator = RAGDataValidator()
+    # Initialize validator
+    # Generation uses LLM_generation (no key needed)
+    # Validation uses Claude API (pass key or use env variable ANTHROPIC_API_KEY)
+    validator = RAGDataValidator(api_key="your-api-key-here")  # Or leave None to use env variable
 
     datasets = {
         "spider": {
