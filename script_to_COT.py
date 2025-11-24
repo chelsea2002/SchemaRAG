@@ -3,16 +3,18 @@ import re
 from typing import Dict, List, Set, Tuple
 from tqdm import tqdm
 import sqlparse
-from llm import LLM_generation  
-
+from llm import LLM_generation
 
 class CoTGenerator:
-    def __init__(self):
-        """Initialize the CoT generator"""
-        pass
+    def __init__(self, max_retries: int = 4):
+        """Initialize the CoT generator
         
-    def create_cot_prompt(self, question: str, database_schema: str, 
-                          ground_truth_sql: str) -> str:
+        Args:
+            max_retries: Maximum number of retry attempts (default: 4)
+        """
+        self.max_retries = max_retries
+
+    def create_cot_prompt(self, question: str, database_schema: str, ground_truth_sql: str) -> str:
         """
         Create prompt for LLM to generate CoT for schema linking.
         As per Equation 2 in the paper, we provide ground-truth SQL.
@@ -24,7 +26,8 @@ Given a natural language question and a database schema, identify which tables a
 **Database Schema:**
 {database_schema}
 
-**Question:** {question}
+**Question:**
+{question}
 
 **Ground Truth SQL (for reference):**
 {ground_truth_sql}
@@ -47,7 +50,6 @@ Please provide your reasoning in the following format:
 ****
 
 **[Provide a summary paragraph explaining the reasoning, emphasizing the most critical field(s) for answering the question. End with:]
-
 The key field matching the question is: [table.column].**
 
 Example format:
@@ -69,9 +71,8 @@ Example format:
 **The key field for determining whether the person in charge is older than 56 is head.age, as the head table stores the relevant personal information. The management table links the person in charge with the department, but it does not directly provide the age information. Therefore, head.age is the most directly related field for answering this question. The key field matching the question is: [head.age].**
 """
         return prompt
-    
-    def generate_cot(self, question: str, database_schema: str, 
-                     ground_truth_sql: str) -> Dict:
+
+    def generate_cot(self, question: str, database_schema: str, ground_truth_sql: str) -> Dict:
         """Generate CoT using LLM_generation function"""
         prompt = self.create_cot_prompt(question, database_schema, ground_truth_sql)
         instruct = "You are a database schema linking expert. Follow the output format exactly as specified."
@@ -79,7 +80,6 @@ Example format:
         try:
             results = LLM_generation(instruct, prompt, n=1)
             cot_output = results[0] if results else ""
-            
             return {
                 "success": True,
                 "cot": cot_output
@@ -89,11 +89,13 @@ Example format:
                 "success": False,
                 "error": str(e)
             }
-    
+
     def parse_cot_output(self, cot_text: str) -> Tuple[Set[str], Set[str], List[str]]:
         """
         Parse CoT output to extract predicted tables, columns, and key fields.
-        Returns: (set of tables, set of columns, list of key fields)
+        
+        Returns:
+            (set of tables, set of columns, list of key fields)
         """
         tables = set()
         columns = set()
@@ -125,11 +127,13 @@ Example format:
             tables.add(table.lower())
         
         return tables, columns, key_fields
-    
+
     def extract_sql_entities(self, sql: str) -> Tuple[Set[str], Set[str]]:
         """
         Extract tables and columns used in the SQL query.
-        Returns: (set of tables, set of columns in table.column format)
+        
+        Returns:
+            (set of tables, set of columns in table.column format)
         """
         parsed = sqlparse.parse(sql)[0]
         tables = set()
@@ -153,16 +157,18 @@ Example format:
                 table_name = str(token).strip().split()[0]
                 if table_name.upper() not in ['WHERE', 'GROUP', 'ORDER', 'LIMIT', 'JOIN']:
                     tables.add(table_name.lower())
-                from_seen = False
+                    from_seen = False
             
             extract_from_token(token)
         
         return tables, columns
-    
+
     def validate_cot_format(self, cot_output: str) -> Tuple[bool, str]:
         """
         Validate CoT output format compliance.
-        Returns: (is_valid, error_message)
+        
+        Returns:
+            (is_valid, error_message)
         """
         if cot_output.count('****') < 2:
             return False, "Missing **** markers (need at least 2)"
@@ -180,10 +186,9 @@ Example format:
             return False, "Missing final declaration: 'The key field matching the question is:'"
         
         return True, "Format is valid"
-    
-    def validate_cot(self, cot_output: str, ground_truth_sql: str, 
-                     predicted_label: str, ground_truth_label: str, 
-                     stats: Dict = None) -> bool:
+
+    def validate_cot(self, cot_output: str, ground_truth_sql: str, predicted_label: str, 
+                     ground_truth_label: str, stats: Dict = None) -> bool:
         """
         Validate CoT output:
         1. Final answer must match ground-truth label
@@ -234,11 +239,50 @@ Example format:
                 stats['entity_inconsistent'] += 1
             print(f"Validation error: {e}")
             return False
-    
+
+    def process_single_item_with_retry(self, question: str, schema: str, ground_truth_sql: str, 
+                                       ground_truth_label: str, stats: Dict) -> Tuple[bool, str, str]:
+        """
+        Process a single item with retry logic.
+        
+        Returns:
+            (success, cot, label) - success indicates if validation passed, 
+                                   label is ground_truth_label if failed after retries
+        """
+        for attempt in range(self.max_retries + 1):
+            result = self.generate_cot(question, schema, ground_truth_sql)
+            
+            if not result['success']:
+                if attempt < self.max_retries:
+                    print(f"  Attempt {attempt + 1} failed to generate, retrying...")
+                    continue
+                else:
+                    stats['failed'] += 1
+                    return False, "", ground_truth_label
+            
+            stats['generated'] += 1
+            cot = result['cot']
+            predicted_label = self.extract_label_from_cot(cot)
+            
+            if self.validate_cot(cot, ground_truth_sql, predicted_label, ground_truth_label, stats):
+                if attempt > 0:
+                    stats['retry_success'] += 1
+                    print(f"  Validation passed on attempt {attempt + 1}")
+                return True, cot, ground_truth_label
+            else:
+                if attempt < self.max_retries:
+                    print(f"  Attempt {attempt + 1} validation failed, retrying...")
+                else:
+                    print(f"  All {self.max_retries + 1} attempts failed, using predicted label as training label")
+                    stats['using_predicted_label'] += 1
+                    return False, cot, predicted_label
+        
+        return False, "", ground_truth_label
+
     def process_dataset(self, dataset_path: str, output_path: str):
         """
         Process entire dataset and generate filtered CoT training data.
-        Implements the filtering process described in Equations 2-4.
+        Implements the filtering process with retry logic.
         """
         with open(dataset_path, 'r') as f:
             dataset = json.load(f)
@@ -249,6 +293,8 @@ Example format:
             "generated": 0,
             "validated": 0,
             "failed": 0,
+            "retry_success": 0,
+            "using_predicted_label": 0,
             "format_errors": {
                 "missing_step1": 0,
                 "missing_step2": 0,
@@ -260,7 +306,7 @@ Example format:
             "entity_inconsistent": 0
         }
         
-        for item in tqdm(dataset, desc="Generating CoT"):
+        for idx, item in enumerate(tqdm(dataset, desc="Generating CoT")):
             question = item['question']
             schema = item['schema']
             ground_truth_sql = item['sql']
@@ -272,57 +318,62 @@ Example format:
                 "columns": sorted(list(sql_columns))
             })
             
-            result = self.generate_cot(question, schema, ground_truth_sql)
+            success, cot, final_label = self.process_single_item_with_retry(
+                question, schema, ground_truth_sql, ground_truth_label, stats
+            )
             
-            if not result['success']:
-                stats['failed'] += 1
-                continue
+            if success:
+                stats['validated'] += 1
             
-            stats['generated'] += 1
-            cot = result['cot']
-            
-            predicted_label = self.extract_label_from_cot(cot)
-            
-            if self.validate_cot(cot, ground_truth_sql, predicted_label, ground_truth_label, stats):
+            # Save data regardless of validation result
+            if cot:  # Only save if we got a CoT output
                 filtered_data.append({
                     'question': question,
                     'schema': schema,
                     'cot': cot,
-                    'label': ground_truth_label,
-                    'sql': ground_truth_sql
+                    'label': final_label,
+                    'sql': ground_truth_sql,
+                    'validated': success
                 })
-                stats['validated'] += 1
         
         with open(output_path, 'w') as f:
             json.dump(filtered_data, f, indent=2, ensure_ascii=False)
         
+        self.print_statistics(stats)
+
+    def print_statistics(self, stats: Dict):
+        """Print detailed processing statistics"""
         print(f"\n{'='*60}")
         print(f"Processing Statistics:")
         print(f"{'='*60}")
-        print(f"Total samples:           {stats['total']}")
-        print(f"Successfully generated:  {stats['generated']}")
-        print(f"Validated and saved:     {stats['validated']}")
-        print(f"Failed to generate:      {stats['failed']}")
+        print(f"Total samples: {stats['total']}")
+        print(f"Successfully generated: {stats['generated']}")
+        print(f"Validated and saved: {stats['validated']}")
+        print(f"Failed to generate: {stats['failed']}")
+        print(f"Retry successes: {stats['retry_success']}")
+        print(f"Using predicted label: {stats['using_predicted_label']}")
         print(f"\nValidation Breakdown:")
-        print(f"  Label mismatch:        {stats['label_mismatch']}")
-        print(f"  Entity inconsistent:   {stats['entity_inconsistent']}")
+        print(f"  Label mismatch: {stats['label_mismatch']}")
+        print(f"  Entity inconsistent: {stats['entity_inconsistent']}")
         print(f"\nFormat Error Breakdown:")
-        print(f"  Missing **** markers:  {stats['format_errors']['missing_markers']}")
-        print(f"  Missing Step 1:        {stats['format_errors']['missing_step1']}")
-        print(f"  Missing Step 2:        {stats['format_errors']['missing_step2']}")
-        print(f"  Missing Step 3:        {stats['format_errors']['missing_step3']}")
-        print(f"  Missing key field:     {stats['format_errors']['missing_key_field']}")
+        print(f"  Missing **** markers: {stats['format_errors']['missing_markers']}")
+        print(f"  Missing Step 1: {stats['format_errors']['missing_step1']}")
+        print(f"  Missing Step 2: {stats['format_errors']['missing_step2']}")
+        print(f"  Missing Step 3: {stats['format_errors']['missing_step3']}")
+        print(f"  Missing key field: {stats['format_errors']['missing_key_field']}")
         print(f"\nSuccess Rate:")
         if stats['generated'] > 0:
-            print(f"  Validation rate:       {stats['validated']/stats['generated']*100:.2f}%")
-        print(f"  Overall success:       {stats['validated']/stats['total']*100:.2f}%")
+            print(f"  Validation rate: {stats['validated']/stats['generated']*100:.2f}%")
+        print(f"  Overall success: {stats['validated']/stats['total']*100:.2f}%")
+        if stats['using_predicted_label'] > 0:
+            print(f"  Predicted label usage: {stats['using_predicted_label']/stats['total']*100:.2f}%")
         print(f"{'='*60}")
-    
+
     def extract_label_from_cot(self, cot: str) -> str:
         """Extract the predicted label (schema linking result) from CoT"""
         tables, columns, key_fields = self.parse_cot_output(cot)
         return json.dumps({
-            "tables": sorted(list(tables)), 
+            "tables": sorted(list(tables)),
             "columns": sorted(list(columns)),
             "key_fields": key_fields
         })
@@ -333,11 +384,9 @@ def main():
     INPUT_DATASET = "data.json"
     OUTPUT_DATASET = "data_cot.json"
     
-    generator = CoTGenerator()
-    
+    generator = CoTGenerator(max_retries=4)
     generator.process_dataset(INPUT_DATASET, OUTPUT_DATASET)
 
 
 if __name__ == "__main__":
-
     main()
