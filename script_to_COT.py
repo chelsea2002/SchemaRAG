@@ -363,12 +363,14 @@ Provide ONLY the JSON output, nothing else."""
         print(f"{'='*60}")
     
     def extract_label_from_cot(self, cot: str) -> str:
-        """Extract the predicted label (schema linking result) from CoT"""
+        """
+        Extract the predicted label (schema linking result) from CoT.
+        Note: key_fields are extracted but not included in the label for comparison purposes.
+        """
         tables, columns, key_fields = self.parse_cot_output(cot)
         return json.dumps({
             "tables": sorted(list(tables)), 
-            "columns": sorted(list(columns)),
-            "key_fields": key_fields
+            "columns": sorted(list(columns))
         })
 
 
