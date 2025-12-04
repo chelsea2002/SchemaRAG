@@ -24,19 +24,8 @@ https://drive.google.com/file/d/1tK-cK5y4G94_EMxzZnghl_aZhzoVi7DZ/view
 
 🏗️ Architecture
 SchemaRAG consists of three core components:
-┌─────────────────────────────────────────────────────────────┐
-│                        SchemaRAG                            │
-├─────────────────┬─────────────────────┬─────────────────────┤
-│  SchemaLinker   │  Schema-Augmented   │ Pareto-Optimal SQL  │
-│                 │    Retriever (SAR)  │  Generator (POSG)   │
-├─────────────────┼─────────────────────┼─────────────────────┤
-│ • CoT reasoning │ • Cross-attention   │ • Multi-candidate   │
-│ • Knowledge     │   mechanism         │   generation        │
-│   distillation  │ • Contrastive       │ • Multi-dimensional │
-│ • GRPO          │   learning          │   evaluation        │
-│   optimization  │ • Structure-aware   │ • Pareto selection  │
-│                 │   embeddings        │                     │
-└─────────────────┴─────────────────────┴─────────────────────┘
+![Uploading ee38dff7-038e-4f70-8144-e11b37412938.png…]()
+
 1. SchemaLinker
 
 PromptSchema: Automatic schema interpretation with BM25S-based sampling
