@@ -8,14 +8,12 @@ aiolimiter==1.2.1
 aiosignal==1.3.2
 airportsdata==20250523
 alembic==1.14.0
-anaconda-anon-usage @ file:///croot/anaconda-anon-usage_1732732445543/work
 annotated-types==0.7.0
 anthropic==0.51.0
 anyio==4.9.0
 anytree==2.13.0
 appdirs==1.4.4
 APScheduler==3.10.4
-archspec @ file:///croot/archspec_1709217642129/work
 argon2-cffi==23.1.0
 argon2-cffi-bindings==21.2.0
 asgiref==3.8.1
@@ -45,10 +43,8 @@ blake3==1.0.5
 blinker==1.9.0
 blis==1.2.1
 bm25s==0.2.13
-boltons @ file:///croot/boltons_1737061692168/work
 boto3==1.35.53
 botocore==1.35.99
-Brotli @ file:///croot/brotli-split_1736182456865/work
 build==1.2.2.post1
 cachetools==5.5.2
 catalogue==2.0.10
@@ -67,13 +63,6 @@ colorclass==2.2.2
 coloredlogs==15.0.1
 compressed-rtf==1.0.7
 compressed-tensors==0.9.4
-conda @ file:///croot/conda_1738168370816/work
-conda-anaconda-telemetry @ file:///croot/conda-anaconda-telemetry_1736524596117/work
-conda-anaconda-tos @ file:///croot/conda-anaconda-tos_1739298990519/work
-conda-content-trust @ file:///croot/conda-content-trust_1714483159009/work
-conda-libmamba-solver @ file:///croot/conda-libmamba-solver_1737733694612/work/src
-conda-package-handling @ file:///croot/conda-package-handling_1731369017509/work
-conda_package_streaming @ file:///croot/conda-package-streaming_1731366181659/work
 confection==0.1.5
 contourpy==1.3.2
 cryptography==44.0.3
@@ -131,7 +120,6 @@ flatbuffers==25.2.10
 fnllm==0.3.0
 fonttools==4.58.0
 fpdf2==2.8.2
-frozendict @ file:///croot/frozendict_1713194832637/work
 frozenlist==1.6.0
 fs==2.4.16
 fsspec==2024.12.0
@@ -221,7 +209,6 @@ langsmith==0.3.42
 language_data==1.3.0
 lark==1.2.2
 ldap3==2.9.1
-libmambapy @ file:///croot/mamba-split_1734469461757/work/libmambapy
 llguidance==0.7.29
 llvmlite==0.44.0
 lm-format-enforcer==0.10.11
@@ -237,7 +224,6 @@ marshmallow==3.26.1
 matplotlib==3.10.3
 mcp==1.10.0
 mdurl==0.1.2
-menuinst @ file:///croot/menuinst_1738943416351/work
 milvus-lite==2.4.12
 mistral_common==1.6.0
 mmh3==5.1.0
@@ -350,7 +336,6 @@ pyarrow==20.0.0
 pyasn1==0.4.8
 pyasn1_modules==0.4.1
 pyclipper==1.3.0.post6
-pycosat @ file:///croot/pycosat_1736868416091/work
 pycountry==24.6.1
 pycparser==2.22
 pydantic==2.10.6
@@ -372,7 +357,6 @@ pyparsing==3.2.3
 pypdf==5.5.0
 PyPika==0.48.9
 pyproject_hooks==1.2.0
-PySocks @ file:///work/perseverance-python-buildout/croot/pysocks_1698845478203/work
 pytest==8.3.5
 pytest-docker==3.1.2
 python-dateutil==2.9.0.post0
@@ -411,8 +395,6 @@ rich-toolkit==0.14.7
 rpds-py==0.25.1
 rsa==4.9.1
 RTFDE==0.1.2.1
-ruamel.yaml @ file:///croot/ruamel.yaml_1727980156079/work
-ruamel.yaml.clib @ file:///croot/ruamel.yaml.clib_1727769819935/work
 ruff==0.11.9
 s3transfer==0.10.4
 safehttpx==0.1.6
@@ -466,7 +448,6 @@ transformers==4.51.3
 trec-car-tools==2.6
 triton==3.3.0
 trl==0.15.2
-truststore @ file:///croot/truststore_1736550121485/work
 typeguard==4.4.2
 typer==0.15.3
 types-PyYAML==6.0.12.20250516
