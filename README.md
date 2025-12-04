@@ -21,3 +21,46 @@ model_dir = snapshot_download('TonyTANG11/SchemaLinker')
 ```
 Additionally, more data can be downloaded from the following link:
 https://drive.google.com/file/d/1tK-cK5y4G94_EMxzZnghl_aZhzoVi7DZ/view
+
+🏗️ Architecture
+SchemaRAG consists of three core components:
+┌─────────────────────────────────────────────────────────────┐
+│                        SchemaRAG                             │
+├─────────────────┬─────────────────────┬─────────────────────┤
+│  SchemaLinker   │  Schema-Augmented   │ Pareto-Optimal SQL  │
+│                 │    Retriever (SAR)  │  Generator (POSG)   │
+├─────────────────┼─────────────────────┼─────────────────────┤
+│ • CoT reasoning │ • Cross-attention   │ • Multi-candidate   │
+│ • Knowledge     │   mechanism         │   generation        │
+│   distillation  │ • Contrastive       │ • Multi-dimensional │
+│ • GRPO          │   learning          │   evaluation        │
+│   optimization  │ • Structure-aware   │ • Pareto selection  │
+│                 │   embeddings        │                     │
+└─────────────────┴─────────────────────┴─────────────────────┘
+1. SchemaLinker
+
+PromptSchema: Automatic schema interpretation with BM25S-based sampling
+CoT-aligned Training: Knowledge distillation from high-quality GPT-4o rationales
+Multi-task Alignment: Error detection, correction, and answer generation
+GRPO Fine-tuning: Reinforcement learning for optimal schema element selection
+
+2. Schema-Augmented Retriever (SAR)
+
+Schema-Aware Embeddings: Cross-attention between question and database schema
+Contrastive Learning: Enhanced discriminability of SQL syntactic structures
+Structure-Focused Retrieval: Retrieves examples based on SQL syntax similarity, not just text
+
+3. Pareto-Optimal SQL Generator (POSG)
+
+Multi-Candidate Generation: Generates diverse SQL query candidates
+Three-Dimensional Evaluation:
+
+Executability (S_ex)
+Schema linking conformity (S_sl)
+Example consistency (S_ec)
+
+
+Pareto Selection: Identifies non-dominated optimal queries
+
+🤝 Contributing
+We welcome contributions! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
