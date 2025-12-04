@@ -24,7 +24,6 @@ https://drive.google.com/file/d/1tK-cK5y4G94_EMxzZnghl_aZhzoVi7DZ/view
 
 🏗️ Architecture
 SchemaRAG consists of three core components:
-![Uploading ee38dff7-038e-4f70-8144-e11b37412938.png…]()
 
 1. SchemaLinker
 
