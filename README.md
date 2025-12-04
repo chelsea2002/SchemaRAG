@@ -10,6 +10,8 @@ BEAVER: https://github.com/peterbaile/beaver
 
 Spider 2.0: https://spider2-sql.github.io/
 
+UniSQL: The UniSQL dataset is included directly in this GitHub repository.
+
 You can download our trained SchemaLinker model using the following command:
 ```python
 # Model Download
