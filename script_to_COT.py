@@ -147,31 +147,48 @@ Example format:
         
         return tables, columns, key_fields
     
-    def extract_sql_entities(self, sql: str) -> Tuple[Set[str], Set[str]]:
+
+    def extract_sql_entities(self, sql: str, database_schema: str) -> Set[str]:
         """
-        Extract tables and columns used in the SQL query using LLM.
-        Returns: (set of tables, set of columns in table.column format)
+        Extract key columns from SQL query with database schema context.
+        Key columns are those used in WHERE, JOIN ON, GROUP BY, HAVING, ORDER BY clauses.
+        
+        Args:
+            sql: SQL query string
+            database_schema: Database schema information
+        
+        Returns:
+            Set of key columns in table.column format (lowercase)
         """
-        prompt = f"""Analyze the following SQL query and extract all tables and columns used.
-
-**SQL Query:**
-{sql}
-
-**Instructions:**
-1. List ALL table names that appear in the query (in FROM, JOIN clauses, etc.)
-2. List ALL columns in the format "table.column" (including those in SELECT, WHERE, JOIN ON, GROUP BY, ORDER BY, etc.)
-3. If a column doesn't have an explicit table prefix in the SQL, infer it based on context
-4. Include columns used in aggregate functions like COUNT(), SUM(), etc.
-
-**Output Format (JSON only, no explanation):**
-{{
-  "tables": ["table1", "table2", ...],
-  "columns": ["table1.column1", "table2.column2", ...]
-}}
-
-Provide ONLY the JSON output, nothing else."""
-
-        instruct = "You are a SQL expert. Extract tables and columns accurately and output only JSON."
+        prompt = f"""Analyze the SQL query with the given database schema and extract key columns.
+    
+    **Database Schema:**
+    {database_schema}
+    
+    **SQL Query:**
+    {sql}
+    
+    **Instructions:**
+    1. Extract ALL columns used in the following clauses:
+       - WHERE clause (filtering conditions)
+       - JOIN ON clause (join conditions)
+       - GROUP BY clause (grouping)
+       - HAVING clause (group filtering)
+       - ORDER BY clause (sorting)
+    
+    2. For each column, provide the format "table.column"
+    3. If a column doesn't have an explicit table prefix in SQL, use the schema to infer the correct table
+    4. Include columns used in aggregate functions if they appear in the above clauses
+    5. Do NOT include columns that only appear in SELECT clause (unless also in above clauses)
+    
+    **Output Format (JSON only, no explanation):**
+    {{
+      "key_columns": ["table1.column1", "table2.column2", ...]
+    }}
+    
+    Provide ONLY the JSON output, nothing else."""
+    
+        instruct = "You are a SQL expert. Extract key columns accurately based on database schema and output only JSON."
         
         try:
             results = LLM_generation(instruct, prompt, n=1)
@@ -189,149 +206,132 @@ Provide ONLY the JSON output, nothing else."""
             
             # Parse JSON response
             parsed = json.loads(response)
-            tables = set(t.lower() for t in parsed.get("tables", []))
-            columns = set(c.lower() for c in parsed.get("columns", []))
+            key_columns = set(c.lower() for c in parsed.get("key_columns", []))
             
-            return tables, columns
+            return key_columns
             
         except json.JSONDecodeError as e:
             print(f"Warning: Failed to parse LLM response as JSON: {e}")
             print(f"Response was: {response[:200]}")
-            # Fallback to empty sets
-            return set(), set()
+            # Fallback to empty set
+            return set()
         except Exception as e:
-            print(f"Warning: Error extracting SQL entities with LLM: {e}")
-            return set(), set()
-    
-    def validate_cot_format(self, cot_output: str) -> Tuple[bool, str]:
-        """
-        Validate CoT output format compliance.
-        Returns: (is_valid, error_message)
-        """
-        if cot_output.count('****') < 2:
-            return False, "Missing **** markers (need at least 2)"
+            print(f"Warning: Error extracting SQL key columns with LLM: {e}")
+            return set()
         
-        if not re.search(r'1\.\s*Understand the key concepts in the question', cot_output, re.IGNORECASE):
-            return False, "Missing Step 1: 'Understand the key concepts in the question'"
-        
-        if not re.search(r'2\.\s*Analyze database table relationships', cot_output, re.IGNORECASE):
-            return False, "Missing Step 2: 'Analyze database table relationships'"
-        
-        if not re.search(r'3\.\s*Key field for filtering', cot_output, re.IGNORECASE):
-            return False, "Missing Step 3: 'Key field for filtering'"
-        
-        if not re.search(r'The key field matching the question is:', cot_output, re.IGNORECASE):
-            return False, "Missing final declaration: 'The key field matching the question is:'"
-        
-        return True, "Format is valid"
+        def validate_cot_format(self, cot_output: str) -> Tuple[bool, str]:
+            """
+            Validate CoT output format compliance.
+            Returns: (is_valid, error_message)
+            """
+            if cot_output.count('****') < 2:
+                return False, "Missing **** markers (need at least 2)"
+            
+            if not re.search(r'1\.\s*Understand the key concepts in the question', cot_output, re.IGNORECASE):
+                return False, "Missing Step 1: 'Understand the key concepts in the question'"
+            
+            if not re.search(r'2\.\s*Analyze database table relationships', cot_output, re.IGNORECASE):
+                return False, "Missing Step 2: 'Analyze database table relationships'"
+            
+            if not re.search(r'3\.\s*Key field for filtering', cot_output, re.IGNORECASE):
+                return False, "Missing Step 3: 'Key field for filtering'"
+            
+            if not re.search(r'The key field matching the question is:', cot_output, re.IGNORECASE):
+                return False, "Missing final declaration: 'The key field matching the question is:'"
+            
+            return True, "Format is valid"
+
     
     def validate_cot(self, cot_output: str, ground_truth_sql: str, 
-                 predicted_label: str, ground_truth_label: str, 
-                 stats: Dict = None) -> bool:
-    """
-    Validate CoT output according to paper's filtering criteria:
-    1. Final answer must match ground-truth label
-    2. Extracted entities must be consistent with SQL query (using set comparison)
-    3. Output must follow the required format
-    """
-    # 1. Format validation
-    format_valid, error_msg = self.validate_cot_format(cot_output)
-    if not format_valid:
-        if stats and 'format_errors' in stats:
-            if "Step 1" in error_msg:
-                stats['format_errors']['missing_step1'] += 1
-            elif "Step 2" in error_msg:
-                stats['format_errors']['missing_step2'] += 1
-            elif "Step 3" in error_msg:
-                stats['format_errors']['missing_step3'] += 1
-            elif "key field" in error_msg.lower():
-                stats['format_errors']['missing_key_field'] += 1
-            elif "****" in error_msg:
-                stats['format_errors']['missing_markers'] += 1
-        print(f"Format validation failed: {error_msg}")
-        return False
-    
-    # 2. Label matching validation
-    try:
-        predicted_dict = json.loads(predicted_label)
-        ground_truth_dict = json.loads(ground_truth_label)
+                 database_schema: str, stats: Dict = None) -> bool:
+        """
+        Validate CoT output according to paper's filtering criteria:
+        1. Extracted key fields must be consistent with SQL query's key columns
+        2. Output must follow the required format
         
-        predicted_tables = set(predicted_dict.get('tables', []))
-        predicted_columns = set(predicted_dict.get('columns', []))
+        Args:
+            cot_output: Generated CoT reasoning text
+            ground_truth_sql: Ground truth SQL query
+            database_schema: Database schema information
+            stats: Statistics dictionary for tracking validation results
         
-        ground_truth_tables = set(ground_truth_dict.get('tables', []))
-        ground_truth_columns = set(ground_truth_dict.get('columns', []))
-        
-    except json.JSONDecodeError as e:
-        if stats:
-            stats['label_mismatch'] += 1
-        print(f"Label parsing failed: {e}")
-        return False
-    
-    # Check if predicted matches ground truth using set comparison
-    if predicted_tables != ground_truth_tables or predicted_columns != ground_truth_columns:
-        if stats:
-            stats['label_mismatch'] += 1
-        print(f"Label mismatch:")
-        print(f"  Tables - Predicted: {predicted_tables}, Ground Truth: {ground_truth_tables}")
-        print(f"  Columns - Predicted: {predicted_columns}, Ground Truth: {ground_truth_columns}")
-        return False
-    
-    # 3. Entity consistency validation using set operations
-    try:
-        cot_tables, cot_columns, key_fields = self.parse_cot_output(cot_output)
-        sql_tables, sql_columns = self.extract_sql_entities(ground_truth_sql)
-        
-        # Check if key fields exist
-        if not key_fields:
-            if stats:
-                stats['entity_inconsistent'] += 1
-            print(f"No key fields extracted")
+        Returns:
+            True if validation passes, False otherwise
+        """
+        # 1. Format validation
+        format_valid, error_msg = self.validate_cot_format(cot_output)
+        if not format_valid:
+            if stats and 'format_errors' in stats:
+                if "Step 1" in error_msg:
+                    stats['format_errors']['missing_step1'] += 1
+                elif "Step 2" in error_msg:
+                    stats['format_errors']['missing_step2'] += 1
+                elif "Step 3" in error_msg:
+                    stats['format_errors']['missing_step3'] += 1
+                elif "key field" in error_msg.lower():
+                    stats['format_errors']['missing_key_field'] += 1
+                elif "****" in error_msg:
+                    stats['format_errors']['missing_markers'] += 1
+            print(f"Format validation failed: {error_msg}")
             return False
         
-        # Set comparison: CoT tables should be subset of or equal to SQL tables
-        if cot_tables and not cot_tables.issubset(sql_tables):
+        # 2. Entity consistency validation using key fields
+        try:
+            # Extract key fields from CoT output
+            _, _, key_fields = self.parse_cot_output(cot_output)
+            
+            # Extract key columns from SQL with schema context
+            sql_key_columns = self.extract_sql_entities(ground_truth_sql, database_schema)
+            
+            # Check if key fields exist
+            if not key_fields:
+                if stats:
+                    stats['entity_inconsistent'] += 1
+                print(f"No key fields extracted from CoT")
+                return False
+            
+            # Normalize key fields to lowercase set
+            cot_key_set = set(kf.lower().strip() for kf in key_fields)
+            
+            # Check if CoT key fields are subset of SQL key columns
+            if not cot_key_set.issubset(sql_key_columns):
+                if stats:
+                    stats['entity_inconsistent'] += 1
+                extra_keys = cot_key_set - sql_key_columns
+                missing_keys = sql_key_columns - cot_key_set
+                print(f"Key field inconsistency:")
+                print(f"  CoT key fields: {cot_key_set}")
+                print(f"  SQL key columns: {sql_key_columns}")
+                print(f"  Extra in CoT: {extra_keys}")
+                print(f"  Missing in CoT: {missing_keys}")
+                return False
+            
+            # Optional: Check if CoT captures at least some key fields
+            # (not too strict - CoT might focus on most important fields)
+            if len(cot_key_set) == 0:
+                if stats:
+                    stats['entity_inconsistent'] += 1
+                print(f"CoT contains no valid key fields")
+                return False
+            
+            return True
+            
+        except Exception as e:
             if stats:
                 stats['entity_inconsistent'] += 1
-            extra_tables = cot_tables - sql_tables
-            print(f"Entity inconsistency - Extra tables in CoT: {extra_tables}")
-            print(f"  CoT tables: {cot_tables}")
-            print(f"  SQL tables: {sql_tables}")
+            print(f"Validation error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-        
-        # Set comparison: CoT columns should be subset of or equal to SQL columns
-        if cot_columns and not cot_columns.issubset(sql_columns):
-            if stats:
-                stats['entity_inconsistent'] += 1
-            extra_columns = cot_columns - sql_columns
-            print(f"Entity inconsistency - Extra columns in CoT: {extra_columns}")
-            print(f"  CoT columns: {cot_columns}")
-            print(f"  SQL columns: {sql_columns}")
-            return False
-        
-        # Optional: Check for completeness (CoT should contain at least some entities)
-        if not cot_tables and not cot_columns:
-            if stats:
-                stats['entity_inconsistent'] += 1
-            print(f"Entity inconsistency - No tables or columns extracted from CoT")
-            return False
-        
-        return True
-        
-    except Exception as e:
-        if stats:
-            stats['entity_inconsistent'] += 1
-        print(f"Validation error: {e}")
-        return False
-    
+
     def process_dataset(self, dataset_path: str, output_path: str):
-        """
-        Process entire dataset and generate filtered CoT training data.
-        Implements the filtering process described in Equations 2-4.
-        """
+    """
+    Process entire dataset and generate filtered CoT training data.
+    Implements the filtering process described in Equations 2-4.
+    """
         with open(dataset_path, 'r') as f:
             dataset = json.load(f)
-        
+    
         filtered_data = []
         stats = {
             "total": len(dataset),
@@ -345,22 +345,15 @@ Provide ONLY the JSON output, nothing else."""
                 "missing_key_field": 0,
                 "missing_markers": 0
             },
-            "label_mismatch": 0,
             "entity_inconsistent": 0
         }
-        
+    
         for item in tqdm(dataset, desc="Generating CoT"):
             question = item['question']
             schema = item['schema']
             ground_truth_sql = item['sql']
             
-            # Use LLM to extract label from SQL
-            sql_tables, sql_columns = self.extract_sql_entities(ground_truth_sql)
-            ground_truth_label = json.dumps({
-                "tables": sorted(list(sql_tables)),
-                "columns": sorted(list(sql_columns))
-            })
-            
+            # Generate CoT
             result = self.generate_cot(question, schema, ground_truth_sql)
             
             if not result['success']:
@@ -370,21 +363,25 @@ Provide ONLY the JSON output, nothing else."""
             stats['generated'] += 1
             cot = result['cot']
             
-            predicted_label = self.extract_label_from_cot(cot)
-            
-            if self.validate_cot(cot, ground_truth_sql, predicted_label, ground_truth_label, stats):
+            # Validate CoT with database schema
+            if self.validate_cot(cot, ground_truth_sql, schema, stats):
+                # Extract key fields for the final label
+                _, _, key_fields = self.parse_cot_output(cot)
+                
                 filtered_data.append({
                     'question': question,
                     'schema': schema,
                     'cot': cot,
-                    'label': ground_truth_label,
+                    'key_fields': key_fields,  # Store identified key fields
                     'sql': ground_truth_sql
                 })
                 stats['validated'] += 1
         
+        # Save filtered dataset
         with open(output_path, 'w') as f:
             json.dump(filtered_data, f, indent=2, ensure_ascii=False)
         
+        # Print statistics
         print(f"\n{'='*60}")
         print(f"Processing Statistics:")
         print(f"{'='*60}")
@@ -393,7 +390,6 @@ Provide ONLY the JSON output, nothing else."""
         print(f"Validated and saved:     {stats['validated']}")
         print(f"Failed to generate:      {stats['failed']}")
         print(f"\nValidation Breakdown:")
-        print(f"  Label mismatch:        {stats['label_mismatch']}")
         print(f"  Entity inconsistent:   {stats['entity_inconsistent']}")
         print(f"\nFormat Error Breakdown:")
         print(f"  Missing **** markers:  {stats['format_errors']['missing_markers']}")
@@ -406,6 +402,7 @@ Provide ONLY the JSON output, nothing else."""
             print(f"  Validation rate:       {stats['validated']/stats['generated']*100:.2f}%")
         print(f"  Overall success:       {stats['validated']/stats['total']*100:.2f}%")
         print(f"{'='*60}")
+    
     
     def extract_label_from_cot(self, cot: str) -> str:
         """
@@ -431,4 +428,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
