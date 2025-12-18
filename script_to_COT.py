@@ -226,58 +226,103 @@ Provide ONLY the JSON output, nothing else."""
         return True, "Format is valid"
     
     def validate_cot(self, cot_output: str, ground_truth_sql: str, 
-                     predicted_label: str, ground_truth_label: str, 
-                     stats: Dict = None) -> bool:
-        """
-        Validate CoT output according to paper's filtering criteria:
-        1. Final answer must match ground-truth label
-        2. Extracted entities must be consistent with SQL query
-        3. Output must follow the required format
-        """
-        format_valid, error_msg = self.validate_cot_format(cot_output)
-        if not format_valid:
-            if stats and 'format_errors' in stats:
-                if "Step 1" in error_msg:
-                    stats['format_errors']['missing_step1'] += 1
-                elif "Step 2" in error_msg:
-                    stats['format_errors']['missing_step2'] += 1
-                elif "Step 3" in error_msg:
-                    stats['format_errors']['missing_step3'] += 1
-                elif "key field" in error_msg.lower():
-                    stats['format_errors']['missing_key_field'] += 1
-                elif "****" in error_msg:
-                    stats['format_errors']['missing_markers'] += 1
-            print(f"Format validation failed: {error_msg}")
-            return False
+                 predicted_label: str, ground_truth_label: str, 
+                 stats: Dict = None) -> bool:
+    """
+    Validate CoT output according to paper's filtering criteria:
+    1. Final answer must match ground-truth label
+    2. Extracted entities must be consistent with SQL query (using set comparison)
+    3. Output must follow the required format
+    """
+    # 1. Format validation
+    format_valid, error_msg = self.validate_cot_format(cot_output)
+    if not format_valid:
+        if stats and 'format_errors' in stats:
+            if "Step 1" in error_msg:
+                stats['format_errors']['missing_step1'] += 1
+            elif "Step 2" in error_msg:
+                stats['format_errors']['missing_step2'] += 1
+            elif "Step 3" in error_msg:
+                stats['format_errors']['missing_step3'] += 1
+            elif "key field" in error_msg.lower():
+                stats['format_errors']['missing_key_field'] += 1
+            elif "****" in error_msg:
+                stats['format_errors']['missing_markers'] += 1
+        print(f"Format validation failed: {error_msg}")
+        return False
+    
+    # 2. Label matching validation
+    try:
+        predicted_dict = json.loads(predicted_label)
+        ground_truth_dict = json.loads(ground_truth_label)
         
-        if predicted_label != ground_truth_label:
-            if stats:
-                stats['label_mismatch'] += 1
-            print(f"Label mismatch")
-            return False
+        predicted_tables = set(predicted_dict.get('tables', []))
+        predicted_columns = set(predicted_dict.get('columns', []))
         
-        try:
-            cot_tables, cot_columns, key_fields = self.parse_cot_output(cot_output)
-            sql_tables, sql_columns = self.extract_sql_entities(ground_truth_sql)
-            
-            if not key_fields:
-                if stats:
-                    stats['entity_inconsistent'] += 1
-                print(f"No key fields extracted")
-                return False
-            
-            if cot_tables and not any(t in sql_tables for t in cot_tables):
-                if stats:
-                    stats['entity_inconsistent'] += 1
-                print(f"Entity inconsistency")
-                return False
-            
-            return True
-        except Exception as e:
+        ground_truth_tables = set(ground_truth_dict.get('tables', []))
+        ground_truth_columns = set(ground_truth_dict.get('columns', []))
+        
+    except json.JSONDecodeError as e:
+        if stats:
+            stats['label_mismatch'] += 1
+        print(f"Label parsing failed: {e}")
+        return False
+    
+    # Check if predicted matches ground truth using set comparison
+    if predicted_tables != ground_truth_tables or predicted_columns != ground_truth_columns:
+        if stats:
+            stats['label_mismatch'] += 1
+        print(f"Label mismatch:")
+        print(f"  Tables - Predicted: {predicted_tables}, Ground Truth: {ground_truth_tables}")
+        print(f"  Columns - Predicted: {predicted_columns}, Ground Truth: {ground_truth_columns}")
+        return False
+    
+    # 3. Entity consistency validation using set operations
+    try:
+        cot_tables, cot_columns, key_fields = self.parse_cot_output(cot_output)
+        sql_tables, sql_columns = self.extract_sql_entities(ground_truth_sql)
+        
+        # Check if key fields exist
+        if not key_fields:
             if stats:
                 stats['entity_inconsistent'] += 1
-            print(f"Validation error: {e}")
+            print(f"No key fields extracted")
             return False
+        
+        # Set comparison: CoT tables should be subset of or equal to SQL tables
+        if cot_tables and not cot_tables.issubset(sql_tables):
+            if stats:
+                stats['entity_inconsistent'] += 1
+            extra_tables = cot_tables - sql_tables
+            print(f"Entity inconsistency - Extra tables in CoT: {extra_tables}")
+            print(f"  CoT tables: {cot_tables}")
+            print(f"  SQL tables: {sql_tables}")
+            return False
+        
+        # Set comparison: CoT columns should be subset of or equal to SQL columns
+        if cot_columns and not cot_columns.issubset(sql_columns):
+            if stats:
+                stats['entity_inconsistent'] += 1
+            extra_columns = cot_columns - sql_columns
+            print(f"Entity inconsistency - Extra columns in CoT: {extra_columns}")
+            print(f"  CoT columns: {cot_columns}")
+            print(f"  SQL columns: {sql_columns}")
+            return False
+        
+        # Optional: Check for completeness (CoT should contain at least some entities)
+        if not cot_tables and not cot_columns:
+            if stats:
+                stats['entity_inconsistent'] += 1
+            print(f"Entity inconsistency - No tables or columns extracted from CoT")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        if stats:
+            stats['entity_inconsistent'] += 1
+        print(f"Validation error: {e}")
+        return False
     
     def process_dataset(self, dataset_path: str, output_path: str):
         """
@@ -386,3 +431,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
