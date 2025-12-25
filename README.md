@@ -1,6 +1,6 @@
 # SchemaRAG
 
-he datasets used in the experiments — Spider, BIRD, BEAVER, and Spider 2.0 — can be downloaded from the following sources:
+The datasets used in the experiments — Spider, BIRD, BEAVER, and Spider 2.0 — can be downloaded from the following sources:
 
 Spider: https://yale-lily.github.io/spider/
 
