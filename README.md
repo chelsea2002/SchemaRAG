@@ -19,7 +19,7 @@ from modelscope import snapshot_download
 
 model_dir = snapshot_download('TonyTANG11/SchemaLinker')
 ```
-Additionally, more data can be downloaded from the following link:
+Additionally, schema-aware data and contrastive learning datasets can be downloaded from the following link:
 https://drive.google.com/file/d/1tK-cK5y4G94_EMxzZnghl_aZhzoVi7DZ/view
 
 🏗️ Architecture
