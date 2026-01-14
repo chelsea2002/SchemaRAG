@@ -218,59 +218,83 @@ The key field for determining whether the person in charge is older than 56 is h
             print(f"Warning: Error extracting SQL key columns with LLM: {e}")
             return set()
         
-        def validate_cot_format(self, cot_output: str) -> Tuple[bool, str]:
-            """
-            Validate CoT output format compliance.
-            Returns: (is_valid, error_message)
-            """
-            if cot_output.count('****') < 2:
-                return False, "Missing **** markers (need at least 2)"
-            
-            if not re.search(r'1\.\s*Understand the key concepts in the question', cot_output, re.IGNORECASE):
-                return False, "Missing Step 1: 'Understand the key concepts in the question'"
-            
-            if not re.search(r'2\.\s*Analyze database table relationships', cot_output, re.IGNORECASE):
-                return False, "Missing Step 2: 'Analyze database table relationships'"
-            
-            if not re.search(r'3\.\s*Key field for filtering', cot_output, re.IGNORECASE):
-                return False, "Missing Step 3: 'Key field for filtering'"
-            
-            if not re.search(r'The key field matching the question is:', cot_output, re.IGNORECASE):
-                return False, "Missing final declaration: 'The key field matching the question is:'"
-            
-            return True, "Format is valid"
-
+    def validate_cot_format(self, cot_output: str) -> Tuple[bool, str]:
+    """
+    Validate Chain-of-Thought output format compliance. (Updated version)
+    No longer checks ** markers, now checks for <think> and </think> tags
     
-    def validate_cot(self, cot_output: str, ground_truth_sql: str, 
+    Returns: (is_valid, error_message)
+    """
+        cot_output = cot_output.strip()
+    
+        # Check if <think> and </think> tags are present
+        if '<think>' not in cot_output:
+            return False, "Missing <think> tag"
+        if '</think>' not in cot_output:
+            return False, "Missing </think> tag"
+        
+        # Check tag order (simple check)
+        think_start = cot_output.find('<think>')
+        think_end = cot_output.find('</think>')
+        if think_start == -1 or think_end == -1 or think_start >= think_end:
+            return False, "<think> and </think> tags are in wrong order or not properly paired"
+        
+        # Check for the three required steps
+        if not re.search(r'1\.\s*Understand the key concepts in the question', cot_output, re.IGNORECASE):
+            return False, "Missing Step 1: 'Understand the key concepts in the question'"
+        
+        if not re.search(r'2\.\s*Analyze database table relationships', cot_output, re.IGNORECASE):
+            return False, "Missing Step 2: 'Analyze database table relationships'"
+        
+        if not re.search(r'3\.\s*Key field for filtering', cot_output, re.IGNORECASE):
+            return False, "Missing Step 3: 'Key field for filtering'"
+        
+        # Check the final key declaration sentence
+        key_declaration_pattern = r'The\s+key\s+field\s+matching\s+the\s+question\s+is:\s*\[.+?\]'
+        matches = list(re.finditer(key_declaration_pattern, cot_output, re.IGNORECASE | re.DOTALL))
+        
+        if not matches:
+            return False, "Cannot find the required final declaration 'The key field matching the question is: [...]'"
+        
+        # Take the last declaration
+        last_match = matches[-1]
+        declaration_text = last_match.group(0)
+        end_pos = last_match.end()
+        remaining = cot_output[end_pos:].strip()
+        
+        if remaining and remaining not in ('.', ' .'):
+            return False, f"Only empty string or single period is allowed after the final '[...]' declaration, found: {repr(remaining)}"
+        
+        if ']' not in declaration_text:
+            return False, "Key field declaration is missing closing bracket ]"
+        
+        return True, "Format validation passed"
+
+
+    def validate_cot(self, cot_output: str, ground_truth_sql: str,
                  database_schema: str, stats: Dict = None) -> bool:
         """
-        Validate CoT output according to paper's filtering criteria:
-        1. Extracted key fields must be consistent with SQL query's key columns
+        Validate Chain-of-Thought output according to the paper's filtering criteria:
+        1. Extracted key fields must be consistent with the key columns in the ground truth SQL
         2. Output must follow the required format
-        
-        Args:
-            cot_output: Generated CoT reasoning text
-            ground_truth_sql: Ground truth SQL query
-            database_schema: Database schema information
-            stats: Statistics dictionary for tracking validation results
-        
-        Returns:
-            True if validation passes, False otherwise
         """
         # 1. Format validation
         format_valid, error_msg = self.validate_cot_format(cot_output)
         if not format_valid:
             if stats and 'format_errors' in stats:
-                if "Step 1" in error_msg:
+                error_lower = error_msg.lower()
+                if "step 1" in error_lower:
                     stats['format_errors']['missing_step1'] += 1
-                elif "Step 2" in error_msg:
+                elif "step 2" in error_lower:
                     stats['format_errors']['missing_step2'] += 1
-                elif "Step 3" in error_msg:
+                elif "step 3" in error_lower:
                     stats['format_errors']['missing_step3'] += 1
-                elif "key field" in error_msg.lower():
-                    stats['format_errors']['missing_key_field'] += 1
-                elif "****" in error_msg:
-                    stats['format_errors']['missing_markers'] += 1
+                elif "think" in error_lower:
+                    stats['format_errors']['missing_think_tags'] += 1
+                elif "key field" in error_lower or "declaration" in error_lower:
+                    stats['format_errors']['missing_or_invalid_key_declaration'] += 1
+                else:
+                    stats['format_errors']['other_format_error'] += 1
             print(f"Format validation failed: {error_msg}")
             return False
         
@@ -279,42 +303,34 @@ The key field for determining whether the person in charge is older than 56 is h
             # Extract key fields from CoT output
             _, _, key_fields = self.parse_cot_output(cot_output)
             
-            # Extract key columns from SQL with schema context
+            # Extract key columns from ground truth SQL with schema context
             sql_key_columns = self.extract_sql_entities(ground_truth_sql, database_schema)
             
-            # Check if key fields exist
+            # Check if key fields were extracted
             if not key_fields:
                 if stats:
                     stats['entity_inconsistent'] += 1
-                print(f"No key fields extracted from CoT")
+                print("No key fields extracted from CoT")
                 return False
             
             # Normalize key fields to lowercase set
             cot_key_set = set(kf.lower().strip() for kf in key_fields)
             
-            # Check if CoT key fields are subset of SQL key columns
+            # Check if CoT key fields are a subset of SQL key columns
             if not cot_key_set.issubset(sql_key_columns):
                 if stats:
                     stats['entity_inconsistent'] += 1
                 extra_keys = cot_key_set - sql_key_columns
                 missing_keys = sql_key_columns - cot_key_set
-                print(f"Key field inconsistency:")
-                print(f"  CoT key fields: {cot_key_set}")
-                print(f"  SQL key columns: {sql_key_columns}")
-                print(f"  Extra in CoT: {extra_keys}")
-                print(f"  Missing in CoT: {missing_keys}")
-                return False
-            
-            # Optional: Check if CoT captures at least some key fields
-            # (not too strict - CoT might focus on most important fields)
-            if len(cot_key_set) == 0:
-                if stats:
-                    stats['entity_inconsistent'] += 1
-                print(f"CoT contains no valid key fields")
+                print("Key field inconsistency detected:")
+                print(f" CoT key fields: {cot_key_set}")
+                print(f" SQL key columns: {sql_key_columns}")
+                print(f" Extra in CoT: {extra_keys}")
+                print(f" Missing in CoT: {missing_keys}")
                 return False
             
             return True
-            
+       
         except Exception as e:
             if stats:
                 stats['entity_inconsistent'] += 1
@@ -427,6 +443,130 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def validate_cot_format(self, cot_output: str) -> Tuple[bool, str]:
+    """
+    Validate CoT output format compliance.（更新版本）
+    不再檢查 ** 標記，改檢查 <think> 和 </think> 是否存在
+    Returns: (is_valid, error_message)
+    """
+    cot_output = cot_output.strip()
+
+    # 檢查 <think> 和 </think> 是否成對出現
+    if '<think>' not in cot_output:
+        return False, "缺少 <think> 標籤"
+
+    if '</think>' not in cot_output:
+        return False, "缺少 </think> 標籤"
+
+    # 檢查 <think> 是否在 </think> 前面（簡單順序檢查）
+    think_start = cot_output.find('<think>')
+    think_end = cot_output.find('</think>')
+    if think_start == -1 or think_end == -1 or think_start >= think_end:
+        return False, "<think> 和 </think> 標籤順序錯誤或未正確配對"
+
+    # 檢查三個步驟標題（維持原有要求）
+    if not re.search(r'1\.\s*Understand the key concepts in the question', cot_output, re.IGNORECASE):
+        return False, "缺少步驟1：'Understand the key concepts in the question'"
+
+    if not re.search(r'2\.\s*Analyze database table relationships', cot_output, re.IGNORECASE):
+        return False, "缺少步驟2：'Analyze database table relationships'"
+
+    if not re.search(r'3\.\s*Key field for filtering', cot_output, re.IGNORECASE):
+        return False, "缺少步驟3：'Key field for filtering'"
+
+    # 檢查最後的關鍵宣告句（維持之前加強過的版本）
+    key_declaration_pattern = r'The\s+key\s+field\s+matching\s+the\s+question\s+is:\s*\[.+?\]'
+
+    matches = list(re.finditer(key_declaration_pattern, cot_output, re.IGNORECASE | re.DOTALL))
+
+    if not matches:
+        return False, "找不到正確的結尾宣告句 'The key field matching the question is: [...]'"
+
+    # 取最後一個宣告
+    last_match = matches[-1]
+    declaration_text = last_match.group(0)
+    end_pos = last_match.end()
+
+    remaining = cot_output[end_pos:].strip()
+    if remaining and remaining not in ('.', ' .'):
+        return False, f"結尾宣告 '[...]' 後面只能是空或單個句號，發現了：{repr(remaining)}"
+
+    if ']' not in declaration_text:
+        return False, "關鍵字段宣告缺少右方括號 ]"
+
+    return True, "格式驗證通過"
+
+def validate_cot(self, cot_output: str, ground_truth_sql: str,
+                 database_schema: str, stats: Dict = None) -> bool:
+    """
+    Validate CoT output according to paper's filtering criteria:
+    1. Extracted key fields must be consistent with SQL query's key columns
+    2. Output must follow the required format
+    """
+    # 1. Format validation
+    format_valid, error_msg = self.validate_cot_format(cot_output)
+    if not format_valid:
+        if stats and 'format_errors' in stats:
+            error_lower = error_msg.lower()
+            if "step 1" in error_lower:
+                stats['format_errors']['missing_step1'] += 1
+            elif "step 2" in error_lower:
+                stats['format_errors']['missing_step2'] += 1
+            elif "step 3" in error_lower:
+                stats['format_errors']['missing_step3'] += 1
+            elif "think" in error_lower:
+                stats['format_errors']['missing_think_tags'] += 1  # 新增
+            elif "key field" in error_lower or "宣告" in error_msg:
+                stats['format_errors']['missing_or_invalid_key_declaration'] += 1
+            else:
+                stats['format_errors']['other_format_error'] += 1  # 兜底
+
+        print(f"Format validation failed: {error_msg}")
+        return False
+
+    # 2. Entity consistency validation using key fields
+    try:
+        # Extract key fields from CoT output
+        _, _, key_fields = self.parse_cot_output(cot_output)
+        
+        # Extract key columns from SQL with schema context
+        sql_key_columns = self.extract_sql_entities(ground_truth_sql, database_schema)
+        
+        # Check if key fields exist
+        if not key_fields:
+            if stats:
+                stats['entity_inconsistent'] += 1
+            print("No key fields extracted from CoT")
+            return False
+        
+        # Normalize key fields to lowercase set
+        cot_key_set = set(kf.lower().strip() for kf in key_fields)
+        
+        # Check if CoT key fields are subset of SQL key columns
+        if not cot_key_set.issubset(sql_key_columns):
+            if stats:
+                stats['entity_inconsistent'] += 1
+            extra_keys = cot_key_set - sql_key_columns
+            missing_keys = sql_key_columns - cot_key_set
+            print("Key field inconsistency:")
+            print(f" CoT key fields: {cot_key_set}")
+            print(f" SQL key columns: {sql_key_columns}")
+            print(f" Extra in CoT: {extra_keys}")
+            print(f" Missing in CoT: {missing_keys}")
+            return False
+        
+        
+        return True
+    
+    except Exception as e:
+        if stats:
+            stats['entity_inconsistent'] += 1
+        print(f"Validation error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 
