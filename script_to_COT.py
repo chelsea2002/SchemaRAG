@@ -30,7 +30,7 @@ Given a natural language question and a database schema, identify which tables a
 
 Please provide your reasoning in the following format:
 
-****
+<think>
 1. Understand the key concepts in the question:
    • [Identify key phrases in the question]
    • [Map them to what they mean in database terms]
@@ -43,14 +43,14 @@ Please provide your reasoning in the following format:
 
 3. Key field for filtering: **[main_table.key_field]** ([explain why this field is critical])
    [Additional explanation of why this field is most relevant]
-****
+</think>
 
 **[Provide a summary paragraph explaining the reasoning, emphasizing the most critical field(s) for answering the question. End with:]
 
 The key field matching the question is: [table.column].**
 
 Example format:
-****
+<think>
 1. Understand the key concepts in the question:
    • `heads of the departments`: Find the head of each department (head_ID in head table)
    • `older than 56`: corresponds to the age column in the head table
@@ -63,9 +63,8 @@ Example format:
 
 3. Key field for filtering: **head.age** (determines if > 56)
    The head table stores personal information directly related to age filtering.
-****
-
-**The key field for determining whether the person in charge is older than 56 is head.age, as the head table stores the relevant personal information. The management table links the person in charge with the department, but it does not directly provide the age information. Therefore, head.age is the most directly related field for answering this question. The key field matching the question is: [head.age].**
+</think>
+The key field for determining whether the person in charge is older than 56 is head.age, as the head table stores the relevant personal information. The management table links the person in charge with the department, but it does not directly provide the age information. Therefore, head.age is the most directly related field for answering this question. The key field matching the question is: [head.age].
 """
         return prompt
     
@@ -428,5 +427,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
